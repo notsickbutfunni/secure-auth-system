@@ -1,6 +1,6 @@
 ## 🗓️ till 15th week Development Plan
 
-### **Day 1 — Project Setup & Planning**
+### **Day 1 — Project Setup & Planning** (19.11)
 - Initialize GitHub repo  
 - Add project structure, README, LICENSE  
 - Write development plan  
@@ -11,7 +11,7 @@
 
 ---
 
-### **Day 2 — Environment Setup & Base FastAPI App**
+### **Day 2 — Environment Setup & Base FastAPI App**  (22.11)
 - Install dependencies  
 - Create FastAPI structure (`main.py`, routers, modular layout)  
 - Virtual environment setup  
@@ -29,8 +29,8 @@
 
 ---
 
-### **Day 4 — Password Hashing (bcrypt) + Input Validation**
-- Implement bcrypt hashing & verification  
+### **Day 4 — Password Hashing (bcrypt) + Input Validation** (22.11 - ???)
+- Implement bcrypt/argon hashing & verification  
 - Add other crypto tools(will define soon)  
 - Prevent weak passwords & malformed inputs  
 

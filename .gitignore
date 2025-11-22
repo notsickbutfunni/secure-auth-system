@@ -6,6 +6,16 @@ __pycache__/
 # C extensions
 *.so
 
+# Ignore frontend app and typical JS artifacts so it isn't accidentally committed
+frontend/
+src/frontend/
+frontend/node_modules/
+src/frontend/node_modules/
+frontend/dist/
+src/frontend/dist/
+src/frontend/.env
+frontend/.env
+
 # Distribution / packaging
 .Python
 build/
