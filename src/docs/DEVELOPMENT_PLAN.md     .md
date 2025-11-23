@@ -34,16 +34,16 @@
 - Add other crypto tools(will define soon)  
 - Prevent weak passwords & malformed inputs  
 
-**Deliverables:** `auth/hashing.py`, `/register` endpoint, unit test for hashing.
+**Deliverables:** `app/secure.py`, `/register` endpoint, unit test for hashing.
 
 ---
 
-### **Day 5 — JWT Authentication (RSA-Signed)**
+### **Day 5 — JWT Authentication (RSA-Signed)** (23.11)
 - Generate RSA key pair  
 - RS256-signed JWT tokens  
 - Access + refresh token logic with expiration & claims
 
-**Deliverables:** `auth/jwt_handler.py`, `/login` endpoint, key storage in `/keys/`.
+**Deliverables:** `app/secure.py`, `/login` endpoint, key storage in `/keys/`.
 
 ---
 
@@ -51,7 +51,7 @@
 - AES-256-GCM for encrypting refresh tokens, backup codes  
 - Handle IV, authentication tag, and key rotation  
 
-**Deliverables:** `auth/aes_cipher.py` with encrypt/decrypt functions and tests.
+**Deliverables:** `app/secure.py` with encrypt/decrypt functions and tests.
 
 ---
 
@@ -59,7 +59,7 @@
 - RSA encryption for wrapping AES session keys  
 - OAEP padding implementation  
 
-**Deliverables:** `auth/rsa_cipher.py` with unit tests.
+**Deliverables:** `app/secure.py` with unit tests.
 
 ---
 
@@ -68,7 +68,7 @@
 - Verify signatures in middleware  
 - Audit logging using signatures  
 
-**Deliverables:** `auth/signatures.py` and unit tests.
+**Deliverables:** `app/secure.py` and unit tests.
 
 ---
 
@@ -78,7 +78,7 @@
 - Compute shared secret  
 - Derive AES key using HKDF  
 
-**Deliverables:** `auth/dh_from_scratch.py` with unit tests and documentation.
+**Deliverables:** `app/secure.py` with unit tests and documentation.
 
 ---
 
