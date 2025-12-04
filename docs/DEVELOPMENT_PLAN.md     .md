@@ -20,9 +20,9 @@
 
 ---
 
-### **Day 3 — Database Design & User Model**
+### **Day 3 — Database Design & User Model** (04.12)
 - Configure DB (SQLite)
-- Create User model with `id`, `username`, `email`, `hashed password`, `totp_secret`
+- Create User model with `id`, `username`, `email`
 - Initialize DB table / storage
 
 **Deliverables:** Database + user table ready.
