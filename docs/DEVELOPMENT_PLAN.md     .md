@@ -13,10 +13,10 @@
 
 ### **Day 2 — Environment Setup & Base FastAPI App**  (22.11)
 - Install dependencies  
-- Create FastAPI structure (`main.py`, routers, modular layout)  
+- Create FastAPI structure (`main.py`)  
 - Virtual environment setup  
 
-**Deliverables:** Working FastAPI server with `/src` folder.
+**Deliverables:** Working FastAPI server.
 
 ---
 
