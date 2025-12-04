@@ -8,6 +8,11 @@ import pyotp
 import re
 import jwt
 from argon2.exceptions import VerifyMismatchError
+import os
+import base64
+import secrets
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
 
 # -------------------------
 # FastAPI app
@@ -23,10 +28,18 @@ app = FastAPI(title="Secure Authentication System")
 DB_URL = "sqlite:///db.sqlite"
 engine = create_engine(DB_URL, echo=True)
 
+# for AES key
+AES_KEY_PATH = "keys/aes_key.bin"
+KEY_SIZE = 32  # 256-bit
+NONCE_SIZE = 12    
 
 # Agon2 hasher
 ph = PasswordHasher()
 
+
+# -------------------------
+# Key Management
+# -------------------------
 
 # keys loading
 with open("keys/private.pem", "rb") as f:
@@ -35,6 +48,21 @@ with open("keys/private.pem", "rb") as f:
 with open("keys/public.pem", "rb") as f:
     PUBLIC_KEY = f.read()
 
+# Generate and load AES key
+def generate_aes_key():
+    os.makedirs("keys", exist_ok=True)
+    key = secrets.token_bytes(KEY_SIZE)
+    with open(AES_KEY_PATH, "wb") as f:
+        f.write(key)
+    return key
+
+def load_aes_key():
+    if not os.path.exists(AES_KEY_PATH):
+        return generate_aes_key()
+    with open(AES_KEY_PATH, "rb") as f:
+        return f.read()
+    
+AES_KEY = load_aes_key()
 
 
 # -------------------------
@@ -47,6 +75,15 @@ class User(SQLModel, table=True):
     email: Optional[str] = None
     password_hash: str
     totp_secret: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class RefreshToken(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id")
+    encrypted_token: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    expires_at: datetime
 
 
 
@@ -112,6 +149,25 @@ def create_refresh_token(username: str):
         "exp": datetime.utcnow() + timedelta(days=7)
     }
     return jwt.encode(payload, PRIVATE_KEY, algorithm="RS256")
+
+
+# ---------------------------
+# Encryption / Decryption
+# ---------------------------
+def encrypt_aes_gcm(plaintext: bytes, aad: bytes = None) -> str:
+    nonce = secrets.token_bytes(NONCE_SIZE)
+    aesgcm = AESGCM(AES_KEY)
+    ciphertext = aesgcm.encrypt(nonce, plaintext, aad)
+    combined = nonce + ciphertext
+    return base64.b64encode(combined).decode()
+
+
+def decrypt_aes_gcm(token_b64: str, aad: bytes = None) -> bytes:
+    combined = base64.b64decode(token_b64)
+    nonce = combined[:NONCE_SIZE]
+    ciphertext = combined[NONCE_SIZE:]
+    aesgcm = AESGCM(AES_KEY)
+    return aesgcm.decrypt(nonce, ciphertext, aad)
 
 
 
@@ -213,6 +269,15 @@ def login(data: LoginSchema):
         # Create tokens
         access = create_access_token(user.username)
         refresh = create_refresh_token(user.username)
+        
+        # Encrypt refresh token for storage
+        encrypted_refresh = encrypt_aes_gcm(refresh.encode(), aad=user.username.encode())
+        
+        # Store encrypted refresh token
+        expires_at = datetime.utcnow() + timedelta(days=7)
+        db_refresh = RefreshToken(user_id=user.id, encrypted_token=encrypted_refresh, expires_at=expires_at)
+        session.add(db_refresh)
+        session.commit()
 
         return {
             "msg": "Login successful",
@@ -221,6 +286,26 @@ def login(data: LoginSchema):
             "token_type": "bearer"
         }
 
+
+
+# Encryption test endpoint
+@app.post("/test/encrypt")
+def test_encrypt(data: dict):
+    """Test AES-256-GCM encryption"""
+    plaintext = data.get("message", "test").encode()
+    encrypted = encrypt_aes_gcm(plaintext)
+    return {"encrypted": encrypted}
+
+
+@app.post("/test/decrypt")
+def test_decrypt(data: dict):
+    """Test AES-256-GCM decryption"""
+    encrypted = data.get("encrypted", "")
+    try:
+        decrypted = decrypt_aes_gcm(encrypted)
+        return {"decrypted": decrypted.decode()}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Decryption failed: {str(e)}")
 
 
 # @app.get("/auth/test")
