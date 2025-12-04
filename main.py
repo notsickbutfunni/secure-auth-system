@@ -14,7 +14,9 @@ import secrets
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import serialization, hashes
-
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import hashes
 
 # -------------------------
 # FastAPI app
@@ -243,6 +245,40 @@ def verify_signature(message: bytes, signature_b64: str) -> bool:
         return True
     except Exception:
         return False
+    
+
+# -----------------------------------
+# Diffie-Hellman (DH) key exchange (RFC 3526 - 2048-bit MODP Group)
+# -----------------------------------
+
+# Large prime (P) for DH - RFC 3526 2048-bit MODP Group
+P = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE65381FFFFFFFFFFFFFFFF
+
+# Generator (G) for DH
+G = 2
+
+def dh_generate_private_key() -> int:
+    """Generate a random private key (secret)"""
+    return secrets.randbelow(P - 2) + 1  # 1 <= private < P-1
+
+def dh_generate_public_key(private_key: int) -> int:
+    """Compute public key g^a mod p"""
+    return pow(G, private_key, P)
+
+def dh_compute_shared_secret(private_key: int, other_public_key: int) -> int:
+    """Compute shared secret: other_pub^priv mod p"""
+    return pow(other_public_key, private_key, P)
+
+def dh_derive_aes_key(shared_secret: int, length: int = 32) -> bytes:
+    """Derive AES key from shared secret integer using HKDF-SHA256"""
+    shared_bytes = shared_secret.to_bytes((shared_secret.bit_length() + 7) // 8, "big")
+    hkdf = HKDF(
+        algorithm=hashes.SHA256(),
+        length=length,
+        salt=None,
+        info=b"dh key agreement",
+    )
+    return hkdf.derive(shared_bytes)
 
 
 
@@ -447,4 +483,116 @@ def test_verify(data: dict = Body(...)):
         "message": data.get("message", ""),
         "signature_valid": is_valid,
         "algorithm": "RSA-PSS with SHA256"
+    }
+
+
+# Diffie-Hellman Key Exchange test endpoints
+@app.post("/test/dh/generate-keys")
+def test_dh_generate_keys():
+    """Test DH key pair generation"""
+    private_key = dh_generate_private_key()
+    public_key = dh_generate_public_key(private_key)
+    
+    return {
+        "msg": "DH key pair generated successfully",
+        "private_key": str(private_key),  # In practice, don't expose private keys
+        "public_key": str(public_key),
+        "algorithm": "Diffie-Hellman (RFC 3526 2048-bit)",
+        "dh_parameters": {
+            "p_bits": P.bit_length(),
+            "g": G
+        }
+    }
+
+
+@app.post("/test/dh/compute-shared-secret")
+def test_dh_compute_shared_secret(data: dict = Body(...)):
+    """Test DH shared secret computation"""
+    my_private_key_str = data.get("my_private_key", "")
+    peer_public_key_str = data.get("peer_public_key", "")
+    
+    if not my_private_key_str or not peer_public_key_str:
+        raise HTTPException(status_code=400, detail="my_private_key and peer_public_key required")
+    
+    try:
+        my_private_key = int(my_private_key_str)
+        peer_public_key = int(peer_public_key_str)
+        
+        shared_secret = dh_compute_shared_secret(my_private_key, peer_public_key)
+        
+        return {
+            "msg": "Shared secret computed successfully",
+            "shared_secret": str(shared_secret),
+            "algorithm": "Diffie-Hellman"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to compute shared secret: {str(e)}")
+
+
+@app.post("/test/dh/derive-aes-key")
+def test_dh_derive_aes_key(data: dict = Body(...)):
+    """Test AES key derivation from DH shared secret"""
+    shared_secret_str = data.get("shared_secret", "")
+    key_length = data.get("key_length", 32)
+    
+    if not shared_secret_str:
+        raise HTTPException(status_code=400, detail="shared_secret required")
+    
+    try:
+        shared_secret = int(shared_secret_str)
+        aes_key = dh_derive_aes_key(shared_secret, key_length)
+        
+        return {
+            "msg": "AES key derived from DH shared secret",
+            "aes_key": base64.b64encode(aes_key).decode(),
+            "key_length_bytes": len(aes_key),
+            "algorithm": "HKDF-SHA256",
+            "info_context": "dh key agreement"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to derive AES key: {str(e)}")
+
+
+@app.post("/test/dh/full-exchange")
+def test_dh_full_exchange():
+    """Test complete DH key exchange between two parties (Alice and Bob)"""
+    # Alice's side
+    alice_private = dh_generate_private_key()
+    alice_public = dh_generate_public_key(alice_private)
+    
+    # Bob's side
+    bob_private = dh_generate_private_key()
+    bob_public = dh_generate_public_key(bob_private)
+    
+    # Both compute shared secret
+    alice_shared = dh_compute_shared_secret(alice_private, bob_public)
+    bob_shared = dh_compute_shared_secret(bob_private, alice_public)
+    
+    # Verify secrets match
+    secrets_match = alice_shared == bob_shared
+    
+    # Derive AES keys (should be identical)
+    alice_aes_key = dh_derive_aes_key(alice_shared, 32)
+    bob_aes_key = dh_derive_aes_key(bob_shared, 32)
+    
+    aes_keys_match = alice_aes_key == bob_aes_key
+    
+    return {
+        "msg": "DH key exchange complete",
+        "alice": {
+            "public_key": str(alice_public),
+            "shared_secret": str(alice_shared),
+            "derived_aes_key": base64.b64encode(alice_aes_key).decode()
+        },
+        "bob": {
+            "public_key": str(bob_public),
+            "shared_secret": str(bob_shared),
+            "derived_aes_key": base64.b64encode(bob_aes_key).decode()
+        },
+        "verification": {
+            "shared_secrets_match": secrets_match,
+            "aes_keys_match": aes_keys_match,
+            "exchange_status": "SUCCESS" if (secrets_match and aes_keys_match) else "FAILED"
+        },
+        "algorithm": "Diffie-Hellman (RFC 3526 2048-bit) + HKDF-SHA256"
     }
