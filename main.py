@@ -1,12 +1,13 @@
-from fastapi import FastAPI, HTTPException
-from datetime import datetime
+from fastapi import FastAPI, HTTPException, Depends
+from datetime import datetime, timedelta
 from typing import Optional
 from sqlmodel import Field, SQLModel, create_engine, Session, select
 from pydantic import BaseModel, EmailStr, field_validator
 from argon2 import PasswordHasher
 import pyotp
-import secrets
 import re
+import jwt
+from argon2.exceptions import VerifyMismatchError
 
 # -------------------------
 # FastAPI app
@@ -25,6 +26,15 @@ engine = create_engine(DB_URL, echo=True)
 
 # Agon2 hasher
 ph = PasswordHasher()
+
+
+# keys loading
+with open("keys/private.pem", "rb") as f:
+    PRIVATE_KEY = f.read()
+
+with open("keys/public.pem", "rb") as f:
+    PUBLIC_KEY = f.read()
+
 
 
 # -------------------------
@@ -75,6 +85,35 @@ class Registering(BaseModel):
             raise ValueError('Password must include a special character')
         return v
         
+        
+        
+# -------------------------
+# JWT Generate 
+# -------------------------
+class LoginSchema(BaseModel):
+    username: str
+    password: str
+    totp: str
+
+
+def create_access_token(username: str):
+    payload = {
+        "sub": username,
+        "type": "access",
+        "exp": datetime.utcnow() + timedelta(minutes=15)
+    }
+    return jwt.encode(payload, PRIVATE_KEY, algorithm="RS256")
+
+
+def create_refresh_token(username: str):
+    payload = {
+        "sub": username,
+        "type": "refresh",
+        "exp": datetime.utcnow() + timedelta(days=7)
+    }
+    return jwt.encode(payload, PRIVATE_KEY, algorithm="RS256")
+
+
 
 # -------------------------
 # DB Initializing 
@@ -117,7 +156,7 @@ def list_users():
 @app.post("/register")
 def register(user: Registering):
     with Session(engine) as session:
-        existing = session.exec(select(User).where(User.username == user.username)).first()
+        existing = session.exec(select(User).where(User.username == user.username.lower())).first()
         if existing:
             raise HTTPException(status_code=400, detail="Username already exists")
 
@@ -128,7 +167,7 @@ def register(user: Registering):
         totp_secret = pyotp.random_base32()
 
         db_user = User(
-            username=user.username,
+            username=user.username.lower(),
             email=user.email,
             password_hash=password_hash,
             totp_secret=totp_secret
@@ -143,6 +182,45 @@ def register(user: Registering):
         "email": db_user.email,
         "totp_secret": db_user.totp_secret  
     }
+    
+    
+    
+# login endpoint
+@app.post("/login")
+def login(data: LoginSchema):
+    with Session(engine) as session:
+        user = session.exec(
+            select(User).where(User.username == data.username.lower())
+        ).first()
+
+        if not user:
+            raise HTTPException(status_code=400, detail="Invalid username or password")
+
+        # Verify password
+        try:
+            ph.verify(user.password_hash, data.password)
+        except VerifyMismatchError:
+            raise HTTPException(status_code=400, detail="Invalid username or password")
+
+        # Verify TOTP
+        if not user.totp_secret:
+            raise HTTPException(status_code=400, detail="TOTP not configured for this user")
+        
+        totp = pyotp.TOTP(user.totp_secret)
+        if not totp.verify(data.totp):
+            raise HTTPException(status_code=400, detail="Invalid TOTP code")
+
+        # Create tokens
+        access = create_access_token(user.username)
+        refresh = create_refresh_token(user.username)
+
+        return {
+            "msg": "Login successful",
+            "access_token": access,
+            "refresh_token": refresh,
+            "token_type": "bearer"
+        }
+
 
 
 # @app.get("/auth/test")
