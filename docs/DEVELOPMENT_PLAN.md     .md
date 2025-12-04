@@ -21,20 +21,20 @@
 ---
 
 ### **Day 3 — Database Design & User Model**
-- Configure DB  
-- Create `User` model with `id`, `username`, `email`, `bcrypt password hash`, `salt`, `created_at`  
-- Migration/init script
+- Configure DB (SQLite)
+- Create User model with `id`, `username`, `email`, `hashed password`, `totp_secret`
+- Initialize DB table / storage
 
 **Deliverables:** Database + user table ready.
 
 ---
 
 ### **Day 4 — Password Hashing (bcrypt) + Input Validation** (22.11 - ???)
-- Implement bcrypt/argon hashing & verification  
+- Implement argon hashing & verification  
 - Add other crypto tools(will define soon)  
 - Prevent weak passwords & malformed inputs  
 
-**Deliverables:** `app/secure.py`, `/register` endpoint, unit test for hashing.
+**Deliverables:** `/register` endpoint, unit test for hashing.
 
 ---
 
@@ -51,7 +51,7 @@
 - AES-256-GCM for encrypting refresh tokens, backup codes  
 - Handle IV, authentication tag, and key rotation  
 
-**Deliverables:** `app/secure.py` with encrypt/decrypt functions and tests.
+**Deliverables:**  with encrypt/decrypt functions and tests.
 
 ---
 
