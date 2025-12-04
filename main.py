@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, Body
 from datetime import datetime, timedelta
 from typing import Optional
 from sqlmodel import Field, SQLModel, create_engine, Session, select
@@ -48,10 +48,12 @@ ph = PasswordHasher()
 
 # keys loading
 with open("keys/private.pem", "rb") as f:
-    PRIVATE_KEY = f.read()
+    private_pem = f.read()
+    PRIVATE_KEY = serialization.load_pem_private_key(private_pem, password=None)
 
 with open("keys/public.pem", "rb") as f:
-    PUBLIC_KEY = f.read()
+    public_pem = f.read()
+    PUBLIC_KEY = serialization.load_pem_public_key(public_pem)
 
 # Generate and load AES key
 def generate_aes_key():
@@ -206,6 +208,41 @@ def decrypt_aes_gcm(token_b64: str, aad: bytes = None) -> bytes:
     ciphertext = combined[NONCE_SIZE:]
     aesgcm = AESGCM(AES_KEY)
     return aesgcm.decrypt(nonce, ciphertext, aad)
+
+
+# -------------------------
+# Digital Signatures (RSA-PSS)
+# -------------------------
+
+def sign_message(message: bytes) -> str:
+    """Sign a message using RSA-PSS"""
+    signature = PRIVATE_KEY.sign(
+        message,
+        padding.PSS(
+            mgf=padding.MGF1(hashes.SHA256()),
+            salt_length=padding.PSS.MAX_LENGTH
+        ),
+        hashes.SHA256()
+    )
+    return base64.b64encode(signature).decode()
+
+
+def verify_signature(message: bytes, signature_b64: str) -> bool:
+    """Verify RSA-PSS signature"""
+    signature = base64.b64decode(signature_b64)
+    try:
+        PUBLIC_KEY.verify(
+            signature,
+            message,
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH
+            ),
+            hashes.SHA256()
+        )
+        return True
+    except Exception:
+        return False
 
 
 
@@ -381,22 +418,33 @@ def test_rsa_decrypt_key(data: dict):
         raise HTTPException(status_code=400, detail=f"RSA decryption failed: {str(e)}")
 
 
-# @app.get("/auth/test")
-# def test_auth():
-#     return {"status": "auth endpoint works"}
+# Digital Signatures test endpoints
+@app.post("/test/sign")
+def test_sign(data: dict = Body(...)):
+    """Test RSA-PSS digital signature signing"""
+    message = data.get("message", "test message").encode()
+    signature = sign_message(message)
+    return {
+        "msg": "Message signed successfully",
+        "message": data.get("message", "test message"),
+        "signature": signature,
+        "algorithm": "RSA-PSS with SHA256"
+    }
 
 
-# -------------------------
-# Unit test for hashing (can be run separately)
-# # -------------------------
-# def test_hash():
-#     password = "StrongPass1!"
-#     hash1 = ph.hash(password)
-#     hash2 = ph.hash(password)
-#     assert hash1 != hash2, "Hashes must differ (unique salts)"
-#     ph.verify(hash1, password)
-#     ph.verify(hash2, password)
-#     print("Argon2 hashing test passed.")
-
-# if __name__ == "__main__":
-#     test_hash()
+@app.post("/test/verify")
+def test_verify(data: dict = Body(...)):
+    """Test RSA-PSS digital signature verification"""
+    message = data.get("message", "").encode()
+    signature = data.get("signature", "")
+    
+    if not message or not signature:
+        raise HTTPException(status_code=400, detail="message and signature required")
+    
+    is_valid = verify_signature(message, signature)
+    return {
+        "msg": "Signature verification complete",
+        "message": data.get("message", ""),
+        "signature_valid": is_valid,
+        "algorithm": "RSA-PSS with SHA256"
+    }
