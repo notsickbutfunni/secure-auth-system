@@ -1,8 +1,8 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException
 from datetime import datetime, timedelta
 from typing import Optional
 from sqlmodel import Field, SQLModel, create_engine, Session, select
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, field_validator
 from argon2 import PasswordHasher
 import pyotp
 import re
@@ -12,6 +12,8 @@ import os
 import base64
 import secrets
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives import serialization, hashes
 
 
 # -------------------------
@@ -31,7 +33,10 @@ engine = create_engine(DB_URL, echo=True)
 # for AES key
 AES_KEY_PATH = "keys/aes_key.bin"
 KEY_SIZE = 32  # 256-bit
-NONCE_SIZE = 12    
+NONCE_SIZE = 12 
+
+# for RSA key
+RSA_KEY_PATH = "keys/rsa_aes_wrap"   
 
 # Agon2 hasher
 ph = PasswordHasher()
@@ -64,6 +69,39 @@ def load_aes_key():
     
 AES_KEY = load_aes_key()
 
+def load_rsa_keys():
+    with open(f"{RSA_KEY_PATH}/private.pem", "rb") as f:
+        private_key = serialization.load_pem_private_key(f.read(), password=None)
+    with open(f"{RSA_KEY_PATH}/public.pem", "rb") as f:
+        public_key = serialization.load_pem_public_key(f.read())
+    return private_key, public_key
+
+private_rsa, public_rsa = load_rsa_keys()
+
+def rsa_encrypt_aes_key(aes_key_bytes: bytes) -> str:
+    """Encrypt AES key with RSA public key using OAEP"""
+    ct = public_rsa.encrypt(
+        aes_key_bytes,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
+    return base64.b64encode(ct).decode()
+
+def rsa_decrypt_aes_key(ct_b64: str) -> bytes:
+    """Decrypt AES key with RSA private key"""
+    ct = base64.b64decode(ct_b64)
+    pt = private_rsa.decrypt(
+        ct,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
+    return pt
 
 # -------------------------
 # User model
@@ -306,6 +344,41 @@ def test_decrypt(data: dict):
         return {"decrypted": decrypted.decode()}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Decryption failed: {str(e)}")
+
+
+# RSA Key Wrapping test endpoints
+@app.post("/test/rsa/encrypt-key")
+def test_rsa_encrypt_key(data: dict):
+    """Test RSA-OAEP encryption of AES key"""
+    # For demo, we'll encrypt the current AES key
+    encrypted_key = rsa_encrypt_aes_key(AES_KEY)
+    return {
+        "msg": "RSA-OAEP encryption successful",
+        "encrypted_aes_key": encrypted_key,
+        "algorithm": "RSA-OAEP with SHA256"
+    }
+
+
+@app.post("/test/rsa/decrypt-key")
+def test_rsa_decrypt_key(data: dict):
+    """Test RSA-OAEP decryption of AES key"""
+    encrypted_key = data.get("encrypted_key", "")
+    try:
+        decrypted_key = rsa_decrypt_aes_key(encrypted_key)
+        # Verify it matches the original AES key
+        if decrypted_key == AES_KEY:
+            return {
+                "msg": "RSA-OAEP decryption successful",
+                "key_valid": True,
+                "algorithm": "RSA-OAEP with SHA256"
+            }
+        else:
+            return {
+                "msg": "RSA-OAEP decryption successful but key mismatch",
+                "key_valid": False
+            }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"RSA decryption failed: {str(e)}")
 
 
 # @app.get("/auth/test")
