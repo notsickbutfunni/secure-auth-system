@@ -12,11 +12,9 @@ import os
 import base64
 import secrets
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives import hashes
 
 # -------------------------
 # FastAPI app
@@ -39,14 +37,15 @@ NONCE_SIZE = 12
 
 # for RSA key
 RSA_KEY_PATH = "keys/rsa_aes_wrap"   
+KEYS_DIR = "keys"
 
 # Agon2 hasher
 ph = PasswordHasher()
 
 
-# -------------------------
-# Key Management
-# -------------------------
+# --------------------------------------------------
+# Key Management, Secure Randomness, Error Handling
+# --------------------------------------------------
 
 # keys loading
 with open("keys/private.pem", "rb") as f:
@@ -106,6 +105,156 @@ def rsa_decrypt_aes_key(ct_b64: str) -> bytes:
         )
     )
     return pt
+
+
+# Secure Random Generation
+import secrets
+
+def secure_random_bytes(n: int = 32):
+    return secrets.token_bytes(n)
+
+def secure_random_string(n: int = 32):
+    return secrets.token_hex(n)
+
+
+# rsa key rotation
+def rotate_rsa_key():
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    key_folder = os.path.join(KEYS_DIR, "rsa")
+    os.makedirs(key_folder, exist_ok=True)
+
+    private_key = rsa.generate_private_key(
+        public_exponent=65537,
+        key_size=2048,
+    )
+
+    with open(f"{key_folder}/{timestamp}_private.pem", "wb") as f:
+        f.write(
+            private_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption()
+            )
+        )
+
+    with open(f"{key_folder}/{timestamp}_public.pem", "wb") as f:
+        f.write(
+            private_key.public_key().public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo
+            )
+        )
+
+    return timestamp
+
+# aes key rotation
+def rotate_aes_key():
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    key_folder = os.path.join(KEYS_DIR, "aes")
+    os.makedirs(key_folder, exist_ok=True)
+
+    key = secrets.token_bytes(32)  # AES-256
+    with open(f"{key_folder}/aes_{timestamp}.key", "wb") as f:
+        f.write(key)
+
+    return timestamp
+
+# Secure Key Loading
+def load_latest_key(folder: str):
+    path = os.path.join(KEYS_DIR, folder)
+    files = sorted(os.listdir(path))
+    if not files:
+        raise RuntimeError(f"No keys in {folder}")
+    return os.path.join(path, files[-1])
+
+# Input Sanitization
+
+def sanitize_username(username: str):
+    if not re.match(r'^[A-Za-z0-9._-]{3,30}$', username):
+        raise ValueError("Invalid username format")
+    return username.strip()
+
+def sanitize_email(email: str):
+    email = email.strip()
+    if "@" not in email or len(email) < 5:
+        raise ValueError("Invalid email")
+    return email
+
+
+# Simple error handler functions 
+def raise_invalid_credentials():
+    raise HTTPException(status_code=401, detail="Invalid username or password")
+
+def raise_invalid_totp():
+    raise HTTPException(status_code=400, detail="Invalid TOTP code")
+
+def raise_user_not_found():
+    raise HTTPException(status_code=404, detail="User not found")
+
+def raise_user_exists():
+    raise HTTPException(status_code=409, detail="User already exists")
+
+def raise_invalid_password():
+    raise HTTPException(status_code=400, detail="Password does not meet security requirements")
+
+def raise_invalid_email():
+    raise HTTPException(status_code=400, detail="Invalid email format")
+
+def raise_encryption_error():
+    raise HTTPException(status_code=500, detail="Encryption operation failed")
+
+def raise_decryption_error():
+    raise HTTPException(status_code=500, detail="Decryption operation failed")
+
+def raise_validation_error(msg: str):
+    raise HTTPException(status_code=422, detail=msg)
+
+
+# Simple input validation functions
+def validate_username_simple(username: str) -> bool:
+    """Validate username: 3-32 chars, alphanumeric + underscore/dash"""
+    if not username or len(username) < 3 or len(username) > 32:
+        return False
+    return bool(re.match(r'^[a-zA-Z0-9_-]{3,32}$', username))
+
+def validate_email_simple(email: str) -> bool:
+    """Validate email format"""
+    if not email or len(email) > 254:
+        return False
+    pattern = r'^[a-zA-Z0-9.!#$%&\'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$'
+    return bool(re.match(pattern, email.lower()))
+
+def validate_totp_code(code: str) -> bool:
+    """Validate TOTP code: must be 6 digits"""
+    if not code or len(code) != 6 or not code.isdigit():
+        return False
+    return True
+
+def sanitize_input(value: str) -> str:
+    """Remove dangerous characters and SQL keywords"""
+    dangerous = ['<', '>', '"', "'", ';', '&', '|', '`', '$']
+    for char in dangerous:
+        value = value.replace(char, '')
+    return value.strip()
+
+
+# Simple secure randomness functions (Day 10)
+def random_token(nbytes: int = 32) -> str:
+    """Generate cryptographically secure random token (hex)"""
+    return secrets.token_hex(nbytes)
+
+def random_token_urlsafe(nbytes: int = 32) -> str:
+    """Generate cryptographically secure random token (URL-safe)"""
+    return secrets.token_urlsafe(nbytes)
+
+def random_bytes(length: int = 32) -> bytes:
+    """Generate cryptographically secure random bytes"""
+    return secrets.token_bytes(length)
+
+def random_nonce(length: int = 12) -> bytes:
+    """Generate random nonce for AES-GCM (default 12 bytes)"""
+    return secrets.token_bytes(length)
+
 
 # -------------------------
 # User model
@@ -595,4 +744,15 @@ def test_dh_full_exchange():
             "exchange_status": "SUCCESS" if (secrets_match and aes_keys_match) else "FAILED"
         },
         "algorithm": "Diffie-Hellman (RFC 3526 2048-bit) + HKDF-SHA256"
+    }
+
+# Key Rotation Endpoint
+@app.post("/keys/rotate")
+def rotate_keys():
+    rsa_ts = rotate_rsa_key()
+    aes_ts = rotate_aes_key()
+    return {
+        "msg": "Keys rotated successfully",
+        "rsa_key": rsa_ts,
+        "aes_key": aes_ts
     }

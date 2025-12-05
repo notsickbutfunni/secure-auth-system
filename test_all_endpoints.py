@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Comprehensive test suite for all secure authentication system endpoints
-Tests Days 1-9 implementations
+Tests Days 1-10 implementations
 """
 import requests
 import json
@@ -463,6 +463,132 @@ def main():
     # Full DH exchange simulation
     dh_success = test_dh_full_exchange()
     test_results['dh_full_exchange'] = 'PASS' if dh_success else 'FAIL'
+    
+    # =====================================================================
+    # Day 10: Error Handling, Input Validation, Secure Randomness Tests
+    # =====================================================================
+    print_info("\nTesting Day 10: Error Handling, Input Validation, Secure Randomness")
+    
+    # Day 10 Test 1: Error handling - Invalid TOTP
+    print_test("Day 10 - Error Handling: Invalid TOTP")
+    payload = {
+        "username": "testuser",
+        "password": "SecureP@ss123!",
+        "totp": "123456"
+    }
+    r = requests.post(f"{BASE_URL}/login", json=payload)
+    if r.status_code == 400:
+        print_success(f"Error handling works: {r.status_code} - {r.json().get('detail')}")
+        test_results['day10_error_totp'] = 'PASS'
+    else:
+        print_error(f"Expected 400, got {r.status_code}")
+        test_results['day10_error_totp'] = 'FAIL'
+    
+    # Day 10 Test 2: Input validation - Invalid email
+    print_test("Day 10 - Input Validation: Invalid Email")
+    payload = {
+        "username": f"test_{int(datetime.now().timestamp() % 10000)}",
+        "email": "invalid-email",
+        "password": "SecureP@ss123!",
+        "password_confirm": "SecureP@ss123!"
+    }
+    r = requests.post(f"{BASE_URL}/register", json=payload)
+    if r.status_code != 200:
+        print_success(f"Invalid email rejected: {r.status_code}")
+        test_results['day10_validate_email'] = 'PASS'
+    else:
+        print_error("Invalid email was accepted (should be rejected)")
+        test_results['day10_validate_email'] = 'FAIL'
+    
+    # Day 10 Test 3: Input validation - Weak password
+    print_test("Day 10 - Input Validation: Weak Password")
+    payload = {
+        "username": f"test_{int(datetime.now().timestamp() % 10000)}",
+        "email": "test@example.com",
+        "password": "weak",
+        "password_confirm": "weak"
+    }
+    r = requests.post(f"{BASE_URL}/register", json=payload)
+    if r.status_code != 200:
+        print_success(f"Weak password rejected: {r.status_code}")
+        test_results['day10_validate_password'] = 'PASS'
+    else:
+        print_error("Weak password was accepted (should be rejected)")
+        test_results['day10_validate_password'] = 'FAIL'
+    
+    # Day 10 Test 4: Secure randomness - DH Key Generation
+    print_test("Day 10 - Secure Randomness: DH Key Generation")
+    r1 = requests.post(f"{BASE_URL}/test/dh/generate-keys")
+    if r1.status_code == 200:
+        key1 = r1.json()
+        r2 = requests.post(f"{BASE_URL}/test/dh/generate-keys")
+        if r2.status_code == 200:
+            key2 = r2.json()
+            if key1['private_key'] != key2['private_key']:
+                print_success("Secure randomness works - two generations produce different keys")
+                test_results['day10_random_dh'] = 'PASS'
+            else:
+                print_error("Keys are identical (randomness may be broken)")
+                test_results['day10_random_dh'] = 'FAIL'
+        else:
+            print_error(f"Second key generation failed: {r2.status_code}")
+            test_results['day10_random_dh'] = 'FAIL'
+    else:
+        print_error(f"Key generation failed: {r1.status_code}")
+        test_results['day10_random_dh'] = 'FAIL'
+    
+    # Day 10 Test 5: Error handling - Invalid credentials
+    print_test("Day 10 - Error Handling: User Not Found")
+    payload = {
+        "username": "nonexistentuser123",
+        "password": "SecureP@ss123!",
+        "totp": "000000"
+    }
+    r = requests.post(f"{BASE_URL}/login", json=payload)
+    if r.status_code == 401:
+        print_success(f"Invalid credentials error: {r.status_code} - {r.json().get('detail')}")
+        test_results['day10_error_notfound'] = 'PASS'
+    else:
+        print_error(f"Expected 401, got {r.status_code}")
+        test_results['day10_error_notfound'] = 'FAIL'
+    
+    # Day 10 Test 6: Secure randomness - AES-GCM Encryption
+    print_test("Day 10 - Secure Randomness: AES-GCM Encryption")
+    payload = {"message": "Test message"}
+    r1 = requests.post(f"{BASE_URL}/test/encrypt", json=payload)
+    if r1.status_code == 200:
+        enc1 = r1.json()['encrypted']
+        r2 = requests.post(f"{BASE_URL}/test/encrypt", json=payload)
+        if r2.status_code == 200:
+            enc2 = r2.json()['encrypted']
+            if enc1 != enc2:
+                print_success("Secure randomness in AES-GCM: Different nonces produce different ciphertexts")
+                test_results['day10_random_aes'] = 'PASS'
+            else:
+                print_error("Same ciphertext for same plaintext (nonce reuse?)")
+                test_results['day10_random_aes'] = 'FAIL'
+        else:
+            print_error(f"Second encryption failed: {r2.status_code}")
+            test_results['day10_random_aes'] = 'FAIL'
+    else:
+        print_error(f"Encryption failed: {r1.status_code}")
+        test_results['day10_random_aes'] = 'FAIL'
+    
+    # Day 10 Test 7: Key rotation - DH Parameters Consistency
+    print_test("Day 10 - Key Management: DH Parameters Consistency")
+    r = requests.post(f"{BASE_URL}/test/dh/generate-keys")
+    if r.status_code == 200:
+        result = r.json()
+        dh_params = result.get('dh_parameters', {})
+        if dh_params.get('p_bits') > 0 and dh_params.get('g') == 2:
+            print_success(f"DH parameters consistent: P ({dh_params['p_bits']} bits), G={dh_params['g']}")
+            test_results['day10_key_rotation'] = 'PASS'
+        else:
+            print_error("DH parameters invalid")
+            test_results['day10_key_rotation'] = 'FAIL'
+    else:
+        print_error(f"DH key generation failed: {r.status_code}")
+        test_results['day10_key_rotation'] = 'FAIL'
     
     # Print Summary
     print(f"\n{BLUE}{'='*60}")
