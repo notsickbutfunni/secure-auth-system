@@ -1,4 +1,5 @@
-from fastapi import FastAPI, HTTPException, Depends, Body
+from fastapi import FastAPI, HTTPException, Depends, Body, Header
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from datetime import datetime, timedelta
 from typing import Optional
 from sqlmodel import Field, SQLModel, create_engine, Session, select
@@ -19,7 +20,14 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 # -------------------------
 # FastAPI app
 # -------------------------
-app = FastAPI(title="Secure Authentication System")
+app = FastAPI(
+    title="Secure Authentication System",
+    description="Production-ready authentication API with JWT, TOTP, and encryption",
+    version="1.0.0"
+)
+
+# Security scheme for Swagger UI
+security = HTTPBearer(auto_error=False)
 
 
 # -------------------------
@@ -432,49 +440,29 @@ def dh_derive_aes_key(shared_secret: int, length: int = 32) -> bytes:
 
 
 # -------------------------
-# DB Initializing 
-# -------------------------
-
-def init_db():
-    SQLModel.metadata.create_all(engine)
-
-init_db()
-
-# -------------------------
 # endpoints
 # -------------------------
 
-# main endpoint
 @app.get("/")
 def root():
-    return {"message": "FastAPI server running!"}
+    return {"message": "Secure Authentication System API", "version": "1.0", "status": "running"}
 
 
-# showing user info
-@app.post("/users/")
-def create_user(user: UserCreate):
-    db_user = User(username=user.username, email=user.email, password_hash=user.password_hash)
-    with Session(engine) as session:
-        session.add(db_user)
-        session.commit()
-        session.refresh(db_user)
-    return {"id": db_user.id, "username": db_user.username, "email": db_user.email}
+# -------------------------
+# Authentication Endpoints
+# -------------------------
 
-@app.get("/users/")
-def list_users():
-    with Session(engine) as session:
-        users = session.exec(select(User)).all()
-    return users
-
-
-
-# registrayion endpoint
+# Registration endpoint
 @app.post("/register")
 def register(user: Registering):
     with Session(engine) as session:
+        # Validate email format
+        if not validate_email_simple(user.email):
+            raise_invalid_email()
+        
         existing = session.exec(select(User).where(User.username == user.username.lower())).first()
         if existing:
-            raise HTTPException(status_code=400, detail="Username already exists")
+            raise HTTPException(status_code=409, detail="Username already exists")
 
         # Hash password
         password_hash = ph.hash(user.password)
@@ -484,7 +472,7 @@ def register(user: Registering):
 
         db_user = User(
             username=user.username.lower(),
-            email=user.email,
+            email=user.email.lower().strip(),
             password_hash=password_hash,
             totp_secret=totp_secret
         )
@@ -498,10 +486,9 @@ def register(user: Registering):
         "email": db_user.email,
         "totp_secret": db_user.totp_secret  
     }
-    
-    
-    
-# login endpoint
+
+
+# Login endpoint
 @app.post("/login")
 def login(data: LoginSchema):
     with Session(engine) as session:
@@ -510,21 +497,21 @@ def login(data: LoginSchema):
         ).first()
 
         if not user:
-            raise HTTPException(status_code=400, detail="Invalid username or password")
+            raise HTTPException(status_code=401, detail="Invalid username or password")
 
         # Verify password
         try:
             ph.verify(user.password_hash, data.password)
         except VerifyMismatchError:
-            raise HTTPException(status_code=400, detail="Invalid username or password")
+            raise HTTPException(status_code=401, detail="Invalid username or password")
 
         # Verify TOTP
         if not user.totp_secret:
             raise HTTPException(status_code=400, detail="TOTP not configured for this user")
         
         totp = pyotp.TOTP(user.totp_secret)
-        if not totp.verify(data.totp):
-            raise HTTPException(status_code=400, detail="Invalid TOTP code")
+        if not totp.verify(data.totp, valid_window=1):
+            raise HTTPException(status_code=401, detail="Invalid TOTP code")
 
         # Create tokens
         access = create_access_token(user.username)
@@ -548,211 +535,175 @@ def login(data: LoginSchema):
 
 
 
-# Encryption test endpoint
-@app.post("/test/encrypt")
-def test_encrypt(data: dict):
-    """Test AES-256-GCM encryption"""
-    plaintext = data.get("message", "test").encode()
-    encrypted = encrypt_aes_gcm(plaintext)
-    return {"encrypted": encrypted}
 
+# -------------------------
+# Token Management Endpoints
+# -------------------------
 
-@app.post("/test/decrypt")
-def test_decrypt(data: dict):
-    """Test AES-256-GCM decryption"""
-    encrypted = data.get("encrypted", "")
-    try:
-        decrypted = decrypt_aes_gcm(encrypted)
-        return {"decrypted": decrypted.decode()}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Decryption failed: {str(e)}")
-
-
-# RSA Key Wrapping test endpoints
-@app.post("/test/rsa/encrypt-key")
-def test_rsa_encrypt_key(data: dict):
-    """Test RSA-OAEP encryption of AES key"""
-    # For demo, we'll encrypt the current AES key
-    encrypted_key = rsa_encrypt_aes_key(AES_KEY)
-    return {
-        "msg": "RSA-OAEP encryption successful",
-        "encrypted_aes_key": encrypted_key,
-        "algorithm": "RSA-OAEP with SHA256"
-    }
-
-
-@app.post("/test/rsa/decrypt-key")
-def test_rsa_decrypt_key(data: dict):
-    """Test RSA-OAEP decryption of AES key"""
-    encrypted_key = data.get("encrypted_key", "")
-    try:
-        decrypted_key = rsa_decrypt_aes_key(encrypted_key)
-        # Verify it matches the original AES key
-        if decrypted_key == AES_KEY:
-            return {
-                "msg": "RSA-OAEP decryption successful",
-                "key_valid": True,
-                "algorithm": "RSA-OAEP with SHA256"
-            }
-        else:
-            return {
-                "msg": "RSA-OAEP decryption successful but key mismatch",
-                "key_valid": False
-            }
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"RSA decryption failed: {str(e)}")
-
-
-# Digital Signatures test endpoints
-@app.post("/test/sign")
-def test_sign(data: dict = Body(...)):
-    """Test RSA-PSS digital signature signing"""
-    message = data.get("message", "test message").encode()
-    signature = sign_message(message)
-    return {
-        "msg": "Message signed successfully",
-        "message": data.get("message", "test message"),
-        "signature": signature,
-        "algorithm": "RSA-PSS with SHA256"
-    }
-
-
-@app.post("/test/verify")
-def test_verify(data: dict = Body(...)):
-    """Test RSA-PSS digital signature verification"""
-    message = data.get("message", "").encode()
-    signature = data.get("signature", "")
+# Token refresh endpoint
+@app.post("/token/refresh")
+def refresh_token(data: dict = Body(...)):
+    """Refresh access token using refresh token"""
+    refresh_token_str = data.get("refresh_token", "")
     
-    if not message or not signature:
-        raise HTTPException(status_code=400, detail="message and signature required")
-    
-    is_valid = verify_signature(message, signature)
-    return {
-        "msg": "Signature verification complete",
-        "message": data.get("message", ""),
-        "signature_valid": is_valid,
-        "algorithm": "RSA-PSS with SHA256"
-    }
-
-
-# Diffie-Hellman Key Exchange test endpoints
-@app.post("/test/dh/generate-keys")
-def test_dh_generate_keys():
-    """Test DH key pair generation"""
-    private_key = dh_generate_private_key()
-    public_key = dh_generate_public_key(private_key)
-    
-    return {
-        "msg": "DH key pair generated successfully",
-        "private_key": str(private_key),  # In practice, don't expose private keys
-        "public_key": str(public_key),
-        "algorithm": "Diffie-Hellman (RFC 3526 2048-bit)",
-        "dh_parameters": {
-            "p_bits": P.bit_length(),
-            "g": G
-        }
-    }
-
-
-@app.post("/test/dh/compute-shared-secret")
-def test_dh_compute_shared_secret(data: dict = Body(...)):
-    """Test DH shared secret computation"""
-    my_private_key_str = data.get("my_private_key", "")
-    peer_public_key_str = data.get("peer_public_key", "")
-    
-    if not my_private_key_str or not peer_public_key_str:
-        raise HTTPException(status_code=400, detail="my_private_key and peer_public_key required")
+    if not refresh_token_str:
+        raise HTTPException(status_code=400, detail="Refresh token required")
     
     try:
-        my_private_key = int(my_private_key_str)
-        peer_public_key = int(peer_public_key_str)
+        # Decode refresh token
+        payload = jwt.decode(refresh_token_str, PUBLIC_KEY, algorithms=["RS256"])
         
-        shared_secret = dh_compute_shared_secret(my_private_key, peer_public_key)
+        if payload.get("type") != "refresh":
+            raise HTTPException(status_code=400, detail="Invalid token type")
+        
+        username = payload.get("sub")
+        
+        # Verify token exists in database
+        with Session(engine) as session:
+            user = session.exec(select(User).where(User.username == username)).first()
+            if not user:
+                raise HTTPException(status_code=401, detail="User not found")
+            
+            # Check if refresh token exists and is not expired
+            stored_token = session.exec(
+                select(RefreshToken)
+                .where(RefreshToken.user_id == user.id)
+                .where(RefreshToken.expires_at > datetime.utcnow())
+            ).first()
+            
+            if not stored_token:
+                raise HTTPException(status_code=401, detail="Refresh token expired or invalid")
+            
+            # Create new access token
+            new_access = create_access_token(username)
+            
+            return {
+                "msg": "Token refreshed successfully",
+                "access_token": new_access,
+                "token_type": "bearer"
+            }
+    
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Refresh token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+
+# Logout endpoint
+@app.post("/logout")
+def logout(data: dict = Body(...)):
+    """Logout user by invalidating refresh token"""
+    refresh_token_str = data.get("refresh_token", "")
+    
+    if not refresh_token_str:
+        raise HTTPException(status_code=400, detail="Refresh token required")
+    
+    try:
+        # Decode refresh token
+        payload = jwt.decode(refresh_token_str, PUBLIC_KEY, algorithms=["RS256"])
+        username = payload.get("sub")
+        
+        with Session(engine) as session:
+            user = session.exec(select(User).where(User.username == username)).first()
+            if not user:
+                raise HTTPException(status_code=404, detail="User not found")
+            
+            # Delete all refresh tokens for this user
+            tokens = session.exec(
+                select(RefreshToken).where(RefreshToken.user_id == user.id)
+            ).all()
+            
+            for token in tokens:
+                session.delete(token)
+            
+            session.commit()
+        
+        return {"msg": "Logged out successfully"}
+    
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=400, detail="Invalid refresh token")
+
+
+# -------------------------
+# JWT Authentication Middleware
+# -------------------------
+
+def verify_access_token(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> str:
+    """Dependency to verify JWT access token from Authorization header"""
+    if not credentials:
+        raise HTTPException(
+            status_code=401,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+    
+    token = credentials.credentials
+    
+    try:
+        # Decode and verify JWT
+        payload = jwt.decode(token, PUBLIC_KEY, algorithms=["RS256"])
+        
+        # Verify token type
+        if payload.get("type") != "access":
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid token type. Expected access token",
+                headers={"WWW-Authenticate": "Bearer"}
+            )
+        
+        # Extract username from token
+        username = payload.get("sub")
+        if not username:
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid token payload",
+                headers={"WWW-Authenticate": "Bearer"}
+            )
+        
+        return username
+    
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=401,
+            detail="Access token has expired",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+    except jwt.InvalidTokenError as e:
+        raise HTTPException(
+            status_code=401,
+            detail=f"Invalid access token: {str(e)}",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+
+
+# -------------------------
+# User Profile Endpoint
+# -------------------------
+
+@app.get("/users/me")
+def get_current_user(username: str = Depends(verify_access_token)):
+    """Get current authenticated user profile"""
+    with Session(engine) as session:
+        user = session.exec(
+            select(User).where(User.username == username)
+        ).first()
+        
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
         
         return {
-            "msg": "Shared secret computed successfully",
-            "shared_secret": str(shared_secret),
-            "algorithm": "Diffie-Hellman"
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "created_at": user.created_at.isoformat(),
+            "totp_enabled": bool(user.totp_secret)
         }
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to compute shared secret: {str(e)}")
 
+# -------------------------
+# DB Initializing 
+# -------------------------
 
-@app.post("/test/dh/derive-aes-key")
-def test_dh_derive_aes_key(data: dict = Body(...)):
-    """Test AES key derivation from DH shared secret"""
-    shared_secret_str = data.get("shared_secret", "")
-    key_length = data.get("key_length", 32)
-    
-    if not shared_secret_str:
-        raise HTTPException(status_code=400, detail="shared_secret required")
-    
-    try:
-        shared_secret = int(shared_secret_str)
-        aes_key = dh_derive_aes_key(shared_secret, key_length)
-        
-        return {
-            "msg": "AES key derived from DH shared secret",
-            "aes_key": base64.b64encode(aes_key).decode(),
-            "key_length_bytes": len(aes_key),
-            "algorithm": "HKDF-SHA256",
-            "info_context": "dh key agreement"
-        }
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to derive AES key: {str(e)}")
+def init_db():
+    SQLModel.metadata.create_all(engine)
 
-
-@app.post("/test/dh/full-exchange")
-def test_dh_full_exchange():
-    """Test complete DH key exchange between two parties (Alice and Bob)"""
-    # Alice's side
-    alice_private = dh_generate_private_key()
-    alice_public = dh_generate_public_key(alice_private)
-    
-    # Bob's side
-    bob_private = dh_generate_private_key()
-    bob_public = dh_generate_public_key(bob_private)
-    
-    # Both compute shared secret
-    alice_shared = dh_compute_shared_secret(alice_private, bob_public)
-    bob_shared = dh_compute_shared_secret(bob_private, alice_public)
-    
-    # Verify secrets match
-    secrets_match = alice_shared == bob_shared
-    
-    # Derive AES keys (should be identical)
-    alice_aes_key = dh_derive_aes_key(alice_shared, 32)
-    bob_aes_key = dh_derive_aes_key(bob_shared, 32)
-    
-    aes_keys_match = alice_aes_key == bob_aes_key
-    
-    return {
-        "msg": "DH key exchange complete",
-        "alice": {
-            "public_key": str(alice_public),
-            "shared_secret": str(alice_shared),
-            "derived_aes_key": base64.b64encode(alice_aes_key).decode()
-        },
-        "bob": {
-            "public_key": str(bob_public),
-            "shared_secret": str(bob_shared),
-            "derived_aes_key": base64.b64encode(bob_aes_key).decode()
-        },
-        "verification": {
-            "shared_secrets_match": secrets_match,
-            "aes_keys_match": aes_keys_match,
-            "exchange_status": "SUCCESS" if (secrets_match and aes_keys_match) else "FAILED"
-        },
-        "algorithm": "Diffie-Hellman (RFC 3526 2048-bit) + HKDF-SHA256"
-    }
-
-# Key Rotation Endpoint
-@app.post("/keys/rotate")
-def rotate_keys():
-    rsa_ts = rotate_rsa_key()
-    aes_ts = rotate_aes_key()
-    return {
-        "msg": "Keys rotated successfully",
-        "rsa_key": rsa_ts,
-        "aes_key": aes_ts
-    }
+init_db()
