@@ -3,3 +3,8 @@ uvicorn
 python-multipart
 pydantic
 sqlmodel
+argon2-cffi
+pyotp
+PyJWT
+cryptography
+requests
