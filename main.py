@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Depends, Body, Header
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from datetime import datetime, timedelta
 from typing import Optional
@@ -24,6 +25,15 @@ app = FastAPI(
     title="Secure Authentication System",
     description="Production-ready authentication API with JWT, TOTP, and encryption",
     version="1.0.0"
+)
+
+# CORS for local frontend (dev only). Adjust or tighten for production.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Security scheme for Swagger UI
@@ -329,7 +339,7 @@ class Registering(BaseModel):
 class LoginSchema(BaseModel):
     username: str
     password: str
-    totp: str
+    totp: Optional[str] = None
 
 
 def create_access_token(username: str):
@@ -505,13 +515,13 @@ def login(data: LoginSchema):
         except VerifyMismatchError:
             raise HTTPException(status_code=401, detail="Invalid username or password")
 
-        # Verify TOTP
-        if not user.totp_secret:
-            raise HTTPException(status_code=400, detail="TOTP not configured for this user")
+        # # Verify TOTP
+        # if not user.totp_secret:
+        #     raise HTTPException(status_code=400, detail="TOTP not configured for this user")
         
-        totp = pyotp.TOTP(user.totp_secret)
-        if not totp.verify(data.totp, valid_window=1):
-            raise HTTPException(status_code=401, detail="Invalid TOTP code")
+        # totp = pyotp.TOTP(user.totp_secret)
+        # if not totp.verify(data.totp, valid_window=1):
+        #     raise HTTPException(status_code=401, detail="Invalid TOTP code")
 
         # Create tokens
         access = create_access_token(user.username)
