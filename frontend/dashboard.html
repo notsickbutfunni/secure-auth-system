@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard - Secure Auth</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f5f0e8;
+      --card: #ffffff;
+      --border: #c5d8d1;
+      --accent: #6b9e95;
+      --accent-pink: #d4a5a5;
+      --text: #2c3e50;
+      --muted: #7a8a8a;
+      --error: #d4847d;
+      --success: #8bb899;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'Comfortaa', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 32px;
+    }
+    .shell {
+      width: min(800px, 100%);
+      position: relative;
+      z-index: 1;
+    }
+    .panel {
+      background: var(--card);
+      border: 2px solid var(--border);
+      border-radius: 20px;
+      padding: 40px;
+    }
+    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+    .title { 
+      font-size: 28px; 
+      font-weight: 700; 
+      letter-spacing: -0.02em;
+      color: var(--accent);
+    }
+    .badge { 
+      padding: 6px 12px; 
+      border-radius: 999px; 
+      background: rgba(107, 158, 149, 0.1);
+      color: var(--accent); 
+      border: 1.5px solid var(--border); 
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .pill-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 20px; }
+    button {
+      border: none;
+      border-radius: 10px;
+      padding: 12px 24px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      font-family: 'Comfortaa', sans-serif;
+    }
+    .ghost { 
+      background: transparent; 
+      color: var(--text); 
+      border: 2px solid var(--border);
+    }
+    .ghost:hover {
+      border-color: var(--accent);
+      background: rgba(107, 158, 149, 0.08);
+    }
+    button:active { transform: translateY(0); }
+    .linkish { 
+      color: var(--accent); 
+      cursor: pointer; 
+      text-decoration: none;
+      font-weight: 600;
+      transition: all 0.3s ease;
+      padding: 12px 16px;
+      border-radius: 10px;
+      border: 2px solid var(--border);
+    }
+    .linkish:hover {
+      background: rgba(107, 158, 149, 0.08);
+      border-color: var(--accent);
+    }
+    .profile-card { display: grid; gap: 12px; margin-top: 20px; }
+    .profile-card > div {
+      padding: 16px;
+      background: #fafafa;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+    }
+    .profile-card span { 
+      color: var(--muted); 
+      font-size: 12px; 
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .profile-card div > div {
+      color: var(--text);
+      font-size: 16px;
+      font-weight: 600;
+      margin-top: 6px;
+    }
+    .log { margin-top: 16px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; padding: 12px; border-radius: 8px; background: rgba(107, 158, 149, 0.05); }
+    .log.error { color: var(--error); background: rgba(212, 132, 125, 0.1); }
+    .log.success { color: var(--success); background: rgba(139, 184, 153, 0.1); }
+    .section { margin-top: 20px; }
+    .docs-menu { 
+      display: flex; 
+      gap: 10px; 
+      flex-wrap: wrap; 
+      margin-bottom: 20px;
+      padding-bottom: 16px;
+      border-bottom: 2px solid var(--border);
+    }
+    .doc-btn {
+      padding: 10px 20px;
+      border-radius: 8px;
+      background: transparent;
+      border: 2px solid var(--border);
+      color: var(--text);
+      cursor: pointer;
+      font-weight: 600;
+      transition: all 0.3s ease;
+      font-family: 'Comfortaa', sans-serif;
+      font-size: 14px;
+    }
+    .doc-btn:hover {
+      border-color: var(--accent);
+      background: rgba(107, 158, 149, 0.08);
+    }
+    .doc-btn.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: white;
+    }
+    .doc-content {
+      padding: 20px;
+      background: #fafafa;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      max-height: 600px;
+      overflow-y: auto;
+      line-height: 1.7;
+    }
+    .doc-content h1 {
+      color: var(--accent);
+      font-size: 24px;
+      margin-top: 0;
+      margin-bottom: 16px;
+    }
+    .doc-content h2 {
+      color: var(--accent);
+      font-size: 20px;
+      margin-top: 24px;
+      margin-bottom: 12px;
+    }
+    .doc-content h3 {
+      color: var(--text);
+      font-size: 16px;
+      margin-top: 20px;
+      margin-bottom: 10px;
+    }
+    .doc-content code {
+      background: rgba(107, 158, 149, 0.1);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+    }
+    .doc-content pre {
+      background: #2c3e50;
+      color: #e0ffff;
+      padding: 16px;
+      border-radius: 8px;
+      overflow-x: auto;
+      font-size: 13px;
+    }
+    .doc-content pre code {
+      background: transparent;
+      padding: 0;
+      color: inherit;
+    }
+    .doc-content ul, .doc-content ol {
+      margin-left: 20px;
+    }
+    .doc-content a {
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .doc-content a:hover {
+      text-decoration: underline;
+    }
+    
+    /* Falling Miku animation */
+    @keyframes fall {
+      to {
+        transform: translateY(100vh) rotate(360deg);
+      }
+    }
+    .falling-miku {
+      position: fixed;
+      width: 50px;
+      height: 50px;
+      background-image: url('./miku-chibi.png');
+      background-size: contain;
+      background-repeat: no-repeat;
+      pointer-events: none;
+      z-index: 1000;
+      animation: fall linear infinite;
+    }
+    .secret-message {
+      margin-top: 20px;
+      padding: 16px;
+      background: linear-gradient(135deg, rgba(212, 164, 165, 0.2) 0%, rgba(107, 158, 149, 0.2) 100%);
+      border: 2px solid var(--accent-pink);
+      border-radius: 10px;
+      color: var(--text);
+      font-weight: 600;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="panel">
+      <div class="header">
+        <div class="title">Dashboard</div>
+        <div class="badge" id="session-state">Authenticated</div>
+      </div>
+      
+      <div class="tabs" style="margin-bottom: 20px;">
+        <button class="tab active" data-section="profile">Profile</button>
+        <button class="tab" data-section="docs">Documentation</button>
+      </div>
+
+      <div id="profile-section" class="section">
+        <div class="pill-row">
+          <button id="btn-profile" class="ghost">Load Profile</button>
+          <button id="btn-logout" class="ghost">Logout</button>
+          <button id="btn-secret" class="ghost">🎤 Secret</button>
+          <a class="linkish" href="http://localhost:8000/docs" target="_blank">Open API Docs → </a> 
+        </div>
+        <div id="profile" class="profile-card"></div>
+        <div id="session-log" class="log"></div>
+        <div id="secret-message" class="secret-message" style="display: none;"></div>
+      </div>
+
+      <div id="docs-section" class="section" style="display: none;">
+        <div class="docs-menu">
+          <button class="doc-btn active" data-doc="api">API Reference</button>
+          <button class="doc-btn" data-doc="architecture">Architecture</button>
+          <button class="doc-btn" data-doc="security">Security Analysis</button>
+        </div>
+        <div id="doc-content" class="doc-content">
+          <p style="color: var(--muted);">Select a document from above...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="./dashboard.js"></script>
+  <script>
+    // Create falling Miku
+    function createFallingMiku() {
+      const miku = document.createElement('div');
+      miku.className = 'falling-miku';
+      miku.style.left = Math.random() * 100 + 'vw';
+      miku.style.animationDuration = (Math.random() * 3 + 4) + 's';
+      miku.style.opacity = Math.random() * 0.5 + 0.3;
+      document.body.appendChild(miku);
+      
+      setTimeout(() => {
+        miku.remove();
+      }, 7000);
+    }
+    
+    // Create Miku every 800ms
+    setInterval(createFallingMiku, 800);
+  </script>
+</body>
+</html>
